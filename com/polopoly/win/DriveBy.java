@@ -5,7 +5,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 import robocode.AdvancedRobot;
-import robocode.BulletHitEvent;
 import robocode.BulletMissedEvent;
 import robocode.DeathEvent;
 import robocode.HitByBulletEvent;
@@ -53,19 +52,22 @@ public class DriveBy extends AdvancedRobot {
             
             if (model != null) {
                 Polar polar = model.pos.polarFrom(getPos());
-                double velocity = (model.heading != null) ? Math.abs(model.heading.distance) : 8;
+                double velocity = model.heading.distance;
+                double sideVelocity = velocity * model.heading.deg.minus(polar.deg).sin();
                 
-                Deg gunCorrection = d(getGunHeading()).minus(polar.deg);
+                double firePower = (polar.distance > 150) ? (400 - polar.distance) / 150 + 1 : (150 - polar.distance) / 50 + 1; 
+                
+                Deg gunCorrection = d(getGunHeading()).minus(calcTargetAngle(model, firePower));
                 //System.out.println("Gun correction: " + gunCorrection);
                 setTurnGunLeft(gunCorrection.degrees180());
                 double gunError = Math.abs(gunCorrection.degrees180());
                 if (getGunHeat() < 0.01 && gunError < 3.0) {
                     if(polar.distance < 150) {
-                        System.out.println("Firing with error " + gunError + ", power " + ((150 - polar.distance) / 50 + 1));
+                        //System.out.println("Firing with error " + gunError + ", power " + ((150 - polar.distance) / 50 + 1));
                         fire((150 - polar.distance) / 50 + 1);
                         fireCount++;
-                    } else if (velocity < 1) {
-                        System.out.println("Kill shot! Velcity = " + velocity);
+                    } else if (sideVelocity < 0.1) {
+                        //System.out.println("Kill shot! Velcity = " + velocity);
                         fire((400 - polar.distance) / 150 + 1);
                         killShotCount++;
                         fireCount++;
@@ -96,6 +98,25 @@ public class DriveBy extends AdvancedRobot {
             execute();
         }
     }
+
+    private Deg calcTargetAngle(RobotModel model, double firepower) {
+        Polar robotVector = model.pos.polarFrom(getPos());
+        Deg angleToRobot = robotVector.deg;
+        
+        Deg beta = d(180).plus(angleToRobot).minus(model.heading.deg);
+        double Ve = model.heading.distance;
+        double Vb = 20.0 - 3.0 * Math.min(firepower, 3.0);
+        //System.out.println("beta = " + beta);
+        //System.out.println("Ve = " + Ve);
+        //System.out.println("Vb = " + Vb);
+        
+        Deg alpha = Deg.arcsin(Ve/Vb * beta.sin());
+        Deg targetDeg = angleToRobot.plus(alpha);
+        
+        //System.out.println("Original: " + robotVector.deg + ", revised: " + targetDeg);
+        
+        return targetDeg;
+    }
     
     @Override
     public void onScannedRobot(ScannedRobotEvent event) {
@@ -108,17 +129,11 @@ public class DriveBy extends AdvancedRobot {
     }
     
     @Override
-    public void onBulletHit(BulletHitEvent event) {
-        //System.out.println("BULLET: my pos: " + getPos());
-        updateModel(event.getName(), new Coords(event.getBullet().getX(), event.getBullet().getY()), event.getEnergy(), null);
-    }
-
-    @Override
     public void onRobotDeath(RobotDeathEvent event) {
         String name = event.getName();
         deadBots.add(name);
         if (model != null && name.equals(model.name)) {
-            System.out.println("Model death: " + name);
+            //System.out.println("Model death: " + name);
             model = null;
         }
     }
