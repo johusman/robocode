@@ -1,5 +1,6 @@
 package com.polopoly.win;
 
+import java.awt.Color;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -27,6 +28,11 @@ public class DriveBy extends AdvancedRobot {
     
     @Override
     public void run() {
+        setBodyColor(new Color(240, 100, 0));
+        setGunColor(new Color(50, 50, 50));
+        setRadarColor(Color.black);
+        setBulletColor(Color.orange);
+
         setAdjustRadarForGunTurn(true);
         while(true) {
             setAhead(50000);
