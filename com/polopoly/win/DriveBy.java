@@ -1,13 +1,15 @@
 package com.polopoly.win;
 
 import java.awt.Color;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Set;
 
 import robocode.AdvancedRobot;
 import robocode.BulletMissedEvent;
 import robocode.DeathEvent;
-import robocode.HitByBulletEvent;
 import robocode.HitRobotEvent;
 import robocode.HitWallEvent;
 import robocode.RobotDeathEvent;
@@ -20,6 +22,7 @@ public class DriveBy extends AdvancedRobot {
     private Set<String> deadBots = new HashSet<String>();
     private RobotModel model;
     private long lastStill = 0;
+    private List<QueuedMovement> queue = Collections.synchronizedList(new LinkedList<QueuedMovement>());
     
     private long killShotCount = 0;
     private long fireCount = 0;
@@ -34,7 +37,9 @@ public class DriveBy extends AdvancedRobot {
 
         setAdjustRadarForGunTurn(true);
         while(true) {
-            setAhead(50000);
+            if (queue.isEmpty()) {
+                setAhead(50000);
+            }
 
             double targetDistance = Math.min(100.0, (getTime() - lastStill) * 2 + 30);
             
@@ -74,24 +79,36 @@ public class DriveBy extends AdvancedRobot {
                     }
                 }
                 
-                if (polar.distance > targetDistance) {
-                    Deg targetHeading = Deg.arcsin(targetDistance / polar.distance).plus(polar.deg);
-                    Deg heading = d(getHeading());
-                    Deg correction = heading.minus(targetHeading);
-                    //System.out.println("Distance: " + targetDistance + " model distance: " + polar.distance);
-                    //System.out.println("Correction: " + correction.degrees180());
-                    switch (correction.compass()) {
-                    case South:
-                        if (correction.degrees180() > 0) {
-                            //System.out.println("South; turning right (" + correction.degrees180() + ")");
-                            turnRight(90);
-                        } else {
-                            //System.out.println("South; turning left (" + correction.degrees180() + ")");
-                            turnLeft(90);
+                if (!queue.isEmpty()) {
+                    QueuedMovement movement = queue.get(0);
+                    if (!movement.isStarted()) {
+                        movement.start();
+                        System.out.println("Starting movement");
+                    } else if (movement.isDone()) {
+                        queue.remove(0);
+                        System.out.println("Movement done");
+                    }
+                } else {
+                    if (polar.distance > targetDistance) {
+                        Deg targetHeading = Deg.arcsin(targetDistance / polar.distance).plus(polar.deg);
+                        Deg heading = d(getHeading());
+                        Deg correction = heading.minus(targetHeading);
+                        //System.out.println("Distance: " + targetDistance + " model distance: " + polar.distance);
+                        //System.out.println("Correction: " + correction.degrees180());
+                        switch (correction.compass()) {
+                        case South:
+                            //if (correction.degrees180() > 0) {
+                            //    System.out.println("South; turning right (" + correction.degrees180() + ") (me: " + getPos() + ", it: " + model.pos + ")");
+                            //    queueTurnRight(90);
+                            //} else {
+                                System.out.println("South; turning left (" + correction.degrees180() + ") (me: " + getPos() + ", it: " + model.pos + ")");
+                                queueTurnLeft(90);
+                            //}
+                            setAhead(0);
+                            break;
+                        default:
+                            setTurnLeft(correction.degrees180());
                         }
-                        break;
-                    default:
-                        setTurnLeft(correction.degrees180());
                     }
                 }
             }
@@ -139,23 +156,6 @@ public class DriveBy extends AdvancedRobot {
     }
     
     @Override
-    public void onHitByBullet(HitByBulletEvent event) {
-        Deg dev = d(event.getHeading()).minus(d(getHeading()));
-        switch(dev.compass()) {
-        case South:
-            dev = dev.flip();
-            // FALL-THRU
-        case North:
-            if (dev.degrees180() > 0) {
-                turnLeft(20);
-            } else {
-                turnRight(20);
-            }
-            break;
-        }
-    }
-
-    @Override
     public void onBulletMissed(BulletMissedEvent event) {
         missCount++;
     }
@@ -167,18 +167,23 @@ public class DriveBy extends AdvancedRobot {
     
     @Override
     public void onHitRobot(HitRobotEvent event) {
-        if (model == null || !event.getName().equals(model.name)) {
-            System.out.println("Hit robot bearing: " + event.getBearing());
-            if (event.getBearing() > 0) {
-                turnLeft(90 - event.getBearing());
-                System.out.println("Turning left: " + (90 - event.getBearing()));
+        if (queue.isEmpty()) {
+            if (model == null || !event.getName().equals(model.name)) {
+                System.out.println("Hit robot bearing: " + event.getBearing());
+                if (event.getBearing() > 0) {
+                    double turn = Math.max(Math.min(90 - event.getBearing(), 45), -45);
+                    queueTurnLeft(turn);
+                    System.out.println("Turning left: " + turn);
+                } else {
+                    double turn = Math.max(Math.min(90 + event.getBearing(), 45), -45);
+                    queueTurnRight(turn);
+                    System.out.println("Turning right: " + turn);
+                }
+                queueAhead(20);
             } else {
-                turnRight(90 + event.getBearing());
-                System.out.println("Turning right: " + (90 + event.getBearing()));
+                System.out.println("Hit target robot, turning right 90");
+                queueTurnRight(90);
             }
-            ahead(20);
-        } else {
-            setTurnLeft(90);
         }
     }
     
@@ -212,4 +217,48 @@ public class DriveBy extends AdvancedRobot {
     public Coords getPos() {
         return new Coords(getX(), getY());
     }
+    
+    public void queueTurnLeft(final double degrees) {
+        System.out.println("Queueing turn left " + degrees);
+        queue.add(new QueuedMovement() {
+            public void start() {
+                super.start();
+                setTurnLeft(degrees);
+            }
+            
+            boolean isDone() {
+                return Math.abs(getTurnRemaining()) < 0.1;
+            }
+        });
+    }
+
+    public void queueTurnRight(final double degrees) {
+        System.out.println("Queueing turn right " + degrees);
+        queue.add(new QueuedMovement() {
+            public void start() {
+                super.start();
+                setTurnRight(degrees);
+            }
+            
+            boolean isDone() {
+                return Math.abs(getTurnRemaining()) < 0.1;
+            }
+        });
+    }
+
+    
+    public void queueAhead(final double distance) {
+        System.out.println("Queueing ahead " + distance);
+        queue.add(new QueuedMovement() {
+            public void start() {
+                super.start();
+                setAhead(distance*2);
+            }
+            
+            boolean isDone() {
+                return Math.abs(getDistanceRemaining()) < distance;
+            }
+        });
+    }
+
 }
