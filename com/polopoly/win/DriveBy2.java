@@ -16,17 +16,21 @@ import robocode.RobotDeathEvent;
 import robocode.ScannedRobotEvent;
 import robocode.WinEvent;
 
-public class DriveBy extends AdvancedRobot {
+public class DriveBy2 extends AdvancedRobot {
     
     private boolean searching = true;
     private Set<String> deadBots = new HashSet<String>();
     private RobotModel model;
     private long lastStill = 0;
+    private boolean flipped = false;
+    private long lastMoving = 0;
+    private long lastFlipped = 0;
     private List<QueuedMovement> queue = Collections.synchronizedList(new LinkedList<QueuedMovement>());
     
     private long killShotCount = 0;
     private long fireCount = 0;
     private long missCount = 0;
+    
     
     @Override
     public void run() {
@@ -39,6 +43,15 @@ public class DriveBy extends AdvancedRobot {
         while(true) {
             if (queue.isEmpty()) {
                 setAhead(50000);
+            }
+            
+            if (getVelocity() > 1.0) {
+                lastMoving = getTime();
+            }
+            
+            if (getTime() - lastMoving > 30) {
+                tryFlip();
+                lastMoving = Long.MAX_VALUE;
             }
 
             double targetDistance = Math.min(100.0, (getTime() - lastStill) * 2 + 30);
@@ -90,7 +103,7 @@ public class DriveBy extends AdvancedRobot {
                     }
                 } else {
                     if (polar.distance > targetDistance) {
-                        Deg targetHeading = Deg.arcsin(targetDistance / polar.distance).plus(polar.deg);
+                        Deg targetHeading = Deg.arcsin((flipped ? -1.0 : 1.0) * targetDistance / polar.distance).plus(polar.deg);
                         Deg heading = d(getHeading());
                         Deg correction = heading.minus(targetHeading);
                         //System.out.println("Distance: " + targetDistance + " model distance: " + polar.distance);
@@ -102,7 +115,11 @@ public class DriveBy extends AdvancedRobot {
                             //    queueTurnRight(90);
                             //} else {
                                 System.out.println("South; turning left (" + correction.degrees180() + ") (me: " + getPos() + ", it: " + model.pos + ")");
-                                queueTurnLeft(90);
+                                if (flipped) {
+                                    queueTurnRight(90);
+                                } else {
+                                    queueTurnLeft(90);
+                                }
                             //}
                             setAhead(0);
                             break;
@@ -259,6 +276,15 @@ public class DriveBy extends AdvancedRobot {
                 return Math.abs(getDistanceRemaining()) < distance;
             }
         });
+    }
+    
+    public void tryFlip() {
+        if (getTime() - lastFlipped > 50) {
+            flipped = !flipped;
+            lastFlipped = getTime();
+            System.out.println("flip!");
+            queueTurnLeft(180);
+        }
     }
 
 }
